@@ -1,0 +1,13 @@
+# Temporary files
+*.tmp
+*.tar.gz
+*.backup.*
+
+# Node.js
+node-v*-darwin-arm64/
+package-lock.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
