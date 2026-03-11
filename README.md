@@ -118,6 +118,10 @@ MIT License - See [LICENSE](LICENSE) file
 
 Contributions welcome! Please feel free to submit issues or pull requests.
 
+## Acknowledgments
+
+This solution was inspired by the pioneering work of [onekung](https://gist.github.com/onekung), who first documented the hybrid installation approach for solving Antigravity Remote SSH issues on macOS. Their [Gist](https://gist.github.com/onekung/b0d5d644033099c48f404d3b694c1876) provided the foundational insights into combining linux-arm server binaries with darwin-specific components.
+
 ## Disclaimer
 
 This is an unofficial workaround. The Antigravity darwin-arm server build may become officially available in the future, which would be the preferred solution.
