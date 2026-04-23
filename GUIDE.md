@@ -50,10 +50,10 @@ brew install wget
 From the Antigravity client installation script:
 
 ```bash
-DISTRO_IDE_VERSION="1.20.5"
-DISTRO_COMMIT="4603c2a412f8c7cca552ff00db91c3ee787016ff"
+DISTRO_IDE_VERSION="1.23.2"
+DISTRO_COMMIT="15487b3041e65228cae24980a3f796c905ef582c"
 COMMIT_ID="${DISTRO_IDE_VERSION}-${DISTRO_COMMIT}"
-# Result: "1.20.5-4603c2a412f8c7cca552ff00db91c3ee787016ff"
+# Result: "1.23.2-15487b3041e65228cae24980a3f796c905ef582c"
 ```
 
 ### Step 2: Download linux-arm Server
@@ -301,7 +301,7 @@ https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/{COMMIT_ID}/
 ### Components
 
 - `{COMMIT_ID}`: `{VERSION}-{COMMIT_HASH}`
-  - Example: `1.20.5-4603c2a412f8c7cca552ff00db91c3ee787016ff`
+  - Example: `1.23.2-15487b3041e65228cae24980a3f796c905ef582c`
 - `{PLATFORM}`: `linux`, `darwin`
 - `{ARCH}`: `arm`, `arm64`, `x64`
 

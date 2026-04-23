@@ -1,201 +1,304 @@
 #!/bin/bash
-# Antigravity Remote SSH Server Installation Script for macOS (Darwin/arm64)
 #
-# Usage: ./install.sh <COMMIT_ID>
-# Example: ./install.sh "1.20.5-4603c2a412f8c7cca552ff00db91c3ee787016ff"
+# Antigravity SSH Server Installation Script (Client-Side Only)
+# This script runs entirely on the CLIENT machine and installs the server on a remote macOS host
 #
-# To get the COMMIT_ID from Antigravity client:
-# 1. Open Antigravity
-# 2. Try to connect via Remote-SSH
-# 3. Check the Output tab for installation script
-# 4. Look for DISTRO_IDE_VERSION and DISTRO_COMMIT values
-# 5. Combine them: DISTRO_IDE_VERSION-DISTRO_COMMIT
+# Usage: ./install.sh [user@hostname]
+# Example: ./install.sh michael@mini
+#
+# Requirements:
+# - Client: Antigravity installed
+# - Server: Node.js, npm (usually pre-installed on macOS)
+# - Both: SSH access configured
+#
 
 set -e
 
-# Colors
+# Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Check arguments
-if [ -z "$1" ]; then
-    echo -e "${RED}Error: COMMIT_ID required${NC}"
-    echo "Usage: $0 <COMMIT_ID>"
-    echo "Example: $0 \"1.20.5-4603c2a412f8c7cca552ff00db91c3ee787016ff\""
+# Configuration
+COMMIT_ID="1.23.2-15487b3041e65228cae24980a3f796c905ef582c"
+NODE_VERSION="v22.11.0"
+
+# Parse arguments
+REMOTE_HOST="$1"
+if [ -z "$REMOTE_HOST" ]; then
+    echo -e "${RED}Error: Remote host required${NC}"
+    echo "Usage: $0 [user@hostname]"
+    echo "Example: $0 michael@mini"
     echo ""
-    echo "To find COMMIT_ID:"
-    echo "1. Open Antigravity client"
-    echo "2. Try to connect via Remote-SSH"
-    echo "3. Check Output tab for the installation script"
-    echo "4. Copy DISTRO_IDE_VERSION and DISTRO_COMMIT"
-    echo "5. Combine them: DISTRO_IDE_VERSION-DISTRO_COMMIT"
+    echo "This script installs Antigravity SSH server on a remote macOS machine."
+    echo "The server machine does NOT need Antigravity.app installed - only Node.js/npm."
     exit 1
 fi
 
-COMMIT_ID="$1"
-COMMIT_HASH="${COMMIT_ID##*-}"
-SERVER_DIR="$HOME/.antigravity-server/bin/$COMMIT_ID"
-TEMP_DIR="/tmp/antigravity-install"
-
-echo -e "${BLUE}=== Antigravity Remote SSH Server Installation ===${NC}"
-echo "Version: $COMMIT_ID"
-echo "Commit: $COMMIT_HASH"
-echo "Target: $SERVER_DIR"
+echo -e "${BLUE}=== Antigravity SSH Server Installation ===${NC}"
+echo "Remote host: ${GREEN}$REMOTE_HOST${NC}"
+echo "Version: ${GREEN}${COMMIT_ID}${NC}"
 echo ""
 
-# Check prerequisites
-echo -e "${YELLOW}Checking prerequisites...${NC}"
-if ! command -v wget &> /dev/null; then
-    echo -e "${RED}Error: wget not found. Install with: brew install wget${NC}"
-    exit 1
-fi
+# Temporary directory on client
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
 
-if ! command -v curl &> /dev/null; then
-    echo -e "${RED}Error: curl not found${NC}"
-    exit 1
-fi
+# ============================================================================
+# Step 1: Check server prerequisites
+# ============================================================================
+echo -e "${YELLOW}Step 1: Checking server prerequisites...${NC}"
 
-if ! command -v npm &> /dev/null; then
-    echo -e "${RED}Error: npm not found${NC}"
+echo "  Checking for Node.js on server..."
+if ! ssh "$REMOTE_HOST" "zsh -lic 'command -v node'" > /dev/null 2>&1; then
+    echo -e "${RED}  Error: Node.js not found on server${NC}"
+    echo "  Install on server: brew install node"
     exit 1
 fi
-echo -e "${GREEN}✓ Prerequisites OK${NC}"
+echo -e "${GREEN}  ✓ Node.js found${NC}"
+
+echo "  Checking for npm on server..."
+if ! ssh "$REMOTE_HOST" "zsh -lic 'command -v npm'" > /dev/null 2>&1; then
+    echo -e "${RED}  Error: npm not found on server${NC}"
+    exit 1
+fi
+echo -e "${GREEN}  ✓ npm found${NC}"
+
 echo ""
 
-# Create temp directory
-echo -e "${YELLOW}Preparing installation...${NC}"
-rm -rf "$TEMP_DIR"
-mkdir -p "$TEMP_DIR"
-
-# Backup existing installation
-if [ -d "$SERVER_DIR" ]; then
-    echo -e "${YELLOW}Backing up existing installation...${NC}"
-    mv "$SERVER_DIR" "${SERVER_DIR}.backup.$(date +%Y%m%d%H%M%S)"
-fi
-
-mkdir -p "$SERVER_DIR"
-echo -e "${GREEN}✓ Server directory created${NC}"
-echo ""
+# ============================================================================
+# Step 2: Download server files to client
+# ============================================================================
+echo -e "${YELLOW}Step 2: Downloading server files to client...${NC}"
 
 # Download linux-arm server tarball
-echo -e "${YELLOW}Downloading linux-arm server tarball...${NC}"
-wget --tries=3 --timeout=30 --continue --quiet \
+echo "  Downloading linux-arm server tarball..."
+wget --tries=3 --timeout=30 --continue --quiet --no-check-certificate \
   -O "$TEMP_DIR/antigravity-linux.tar.gz" \
   "https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/${COMMIT_ID}/linux-arm/Antigravity-reh.tar.gz"
 
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Error: Download failed. Trying alternative mirrors...${NC}"
+if [ ! -f "$TEMP_DIR/antigravity-linux.tar.gz" ]; then
+    echo -e "${RED}  Error: Failed to download server tarball${NC}"
+    exit 1
+fi
+echo -e "${GREEN}  ✓ Downloaded server tarball$(du -h "$TEMP_DIR/antigravity-linux.tar.gz" | cut -f1)${NC}"
 
-    # Try alternative mirrors
-    DOWNLOAD_URLS=(
-        "https://redirector.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/${COMMIT_ID}/linux-arm/Antigravity-reh.tar.gz"
-        "https://edgedl.me.gvt1.com/edgedl/antigravity/stable/${COMMIT_ID}/linux-arm/Antigravity-reh.tar.gz"
-        "https://redirector.gvt1.com/edgedl/antigravity/stable/${COMMIT_ID}/linux-arm/Antigravity-reh.tar.gz"
-    )
+# Download Node.js binary for darwin-arm64
+echo "  Downloading Node.js ${NODE_VERSION} for darwin-arm64..."
+curl -fsSLk "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-arm64.tar.gz" -o "$TEMP_DIR/node.tar.gz"
 
-    DOWNLOAD_SUCCESS=0
-    for url in "${DOWNLOAD_URLS[@]}"; do
-        echo "Trying: $url"
-        wget --tries=2 --timeout=10 --quiet -O "$TEMP_DIR/antigravity-linux.tar.gz" "$url"
-        if [ $? -eq 0 ]; then
-            DOWNLOAD_SUCCESS=1
-            break
-        fi
-    done
+if [ ! -f "$TEMP_DIR/node.tar.gz" ]; then
+    echo -e "${RED}  Error: Failed to download Node.js${NC}"
+    exit 1
+fi
+echo -e "${GREEN}  ✓ Downloaded Node.js$(du -h "$TEMP_DIR/node.tar.gz" | cut -f1)${NC}"
 
-    if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
-        echo -e "${RED}Error: All download attempts failed${NC}"
-        echo -e "${YELLOW}Note: Make sure COMMIT_ID is correct and includes both version and commit hash${NC}"
-        exit 1
-    fi
+echo ""
+
+# ============================================================================
+# Step 3: Prepare server package on client
+# ============================================================================
+echo -e "${YELLOW}Step 3: Preparing server package on client...${NC}"
+
+# Extract linux-arm server
+echo "  Extracting linux-arm server..."
+mkdir -p "$TEMP_DIR/server"
+tar -xzf "$TEMP_DIR/antigravity-linux.tar.gz" -C "$TEMP_DIR/server" --strip-components 1
+echo -e "${GREEN}  ✓ Extracted$(du -sh "$TEMP_DIR/server" | cut -f1)${NC}"
+
+# Extract and replace Node.js binary
+echo "  Replacing Node.js binary with darwin-arm64 version..."
+mkdir -p "$TEMP_DIR/node-temp"
+tar -xzf "$TEMP_DIR/node.tar.gz" -C "$TEMP_DIR/node-temp"
+cp "$TEMP_DIR/node-temp/node-${NODE_VERSION}-darwin-arm64/bin/node" "$TEMP_DIR/server/node"
+chmod +x "$TEMP_DIR/server/node"
+echo -e "${GREEN}  ✓ Node.js binary replaced${NC}"
+
+# SURGICAL REPLACEMENT: Native Modules from local app
+echo "  Surgically replacing native modules from local Antigravity app..."
+LOCAL_APP_RESOURCES="/Applications/Antigravity.app/Contents/Resources/app"
+SERVER_NODE_MODULES="$TEMP_DIR/server/node_modules"
+
+if [ -d "$LOCAL_APP_RESOURCES" ]; then
+    # spdlog
+    cp "$LOCAL_APP_RESOURCES/node_modules/@vscode/spdlog/build/Release/spdlog.node" "$SERVER_NODE_MODULES/@vscode/spdlog/build/Release/spdlog.node"
+    # watcher
+    cp "$LOCAL_APP_RESOURCES/node_modules/@parcel/watcher/build/Release/watcher.node" "$SERVER_NODE_MODULES/@parcel/watcher/build/Release/watcher.node"
+    # pty
+    cp "$LOCAL_APP_RESOURCES/node_modules/node-pty/build/Release/pty.node" "$SERVER_NODE_MODULES/node-pty/build/Release/pty.node" 2>/dev/null || \
+    cp "$LOCAL_APP_RESOURCES/node_modules/node-pty/prebuilds/darwin-arm64/pty.node" "$SERVER_NODE_MODULES/node-pty/build/Release/pty.node"
+    
+    echo -e "${GREEN}  ✓ Native modules replaced from local app${NC}"
+    
+    # Language Server
+    echo "  Extracting Language Server from local app..."
+    LOCAL_EXT_BIN="$LOCAL_APP_RESOURCES/extensions/antigravity/bin"
+    SERVER_EXT_BIN="$TEMP_DIR/server/extensions/antigravity/bin"
+    
+    cp "$LOCAL_EXT_BIN/language_server_macos_x64" "$SERVER_EXT_BIN/language_server_macos_x64"
+    # Create the symlink that the extension is looking for (language_server_macos_arm)
+    ln -sf "language_server_macos_x64" "$SERVER_EXT_BIN/language_server_macos_arm"
+    # Also link to the old name just in case
+    ln -sf "language_server_macos_x64" "$SERVER_EXT_BIN/language_server_linux_arm"
+    
+    echo -e "${GREEN}  ✓ Language server replaced and aliased${NC}"
+else
+    echo -e "${RED}  Error: Local Antigravity.app not found. Cannot perform surgical extraction.${NC}"
+    exit 1
 fi
 
-echo -e "${GREEN}✓ Download complete${NC}"
+# Update product.json with correct commit ID and tunnel config
+echo "  Updating product.json..."
+COMMIT_HASH="${COMMIT_ID#*-}"
+echo "$COMMIT_HASH" > "$TEMP_DIR/server/commit-id"
+
+if [ -f "$TEMP_DIR/server/product.json" ]; then
+    if command -v python3 &> /dev/null; then
+        python3 << EOF
+import json
+try:
+    with open('$TEMP_DIR/server/product.json', 'r') as f:
+        data = json.load(f)
+    data['commit'] = '${COMMIT_HASH}'
+    # Add missing tunnel configs to satisfy 1.20+ requirements
+    data['tunnelApplicationName'] = 'antigravity-tunnel'
+    data['tunnelApplicationConfig'] = {
+        'authenticationProviders': {
+            'github': {
+                'scopes': ['user:email', 'read:org']
+            }
+        }
+    }
+    with open('$TEMP_DIR/server/product.json', 'w') as f:
+        json.dump(data, f, indent=2)
+except Exception as e:
+    print(f"  ⚠ product.json update error: {e}")
+EOF
+    else
+        sed -i.bak "s/\"commit\": \".*\"/\"commit\": \"${COMMIT_HASH}\"/" "$TEMP_DIR/server/product.json" 2>/dev/null || true
+        rm -f "$TEMP_DIR/server/product.json.bak" 2>/dev/null || true
+    fi
+    echo -e "${GREEN}  ✓ product.json updated${NC}"
+else
+    echo -e "${YELLOW}  ⚠ product.json not found, skipping update${NC}"
+fi
+
 echo ""
 
-# Extract complete linux-arm server
-echo -e "${YELLOW}Extracting linux-arm server...${NC}"
-tar -xzf "$TEMP_DIR/antigravity-linux.tar.gz" -C "$SERVER_DIR" --strip-components 1
-echo -e "${GREEN}✓ Server extracted${NC}"
-echo ""
+# ============================================================================
+# Step 4: Create remote installation script
+# ============================================================================
+echo -e "${YELLOW}Step 4: Creating installation script for remote...${NC}"
 
-# Update commit ID in product.json
-echo -e "${YELLOW}Updating configuration...${NC}"
-OLD_COMMIT=$(grep '"commit"' "$SERVER_DIR/product.json" | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
-sed -i.bak "s/$OLD_COMMIT/$COMMIT_HASH/g" "$SERVER_DIR/product.json"
-rm -f "$SERVER_DIR/product.json.bak"
+cat > "$TEMP_DIR/remote-install.sh" << 'REMOTESCRIPT'
+#!/bin/bash
+set -e
 
-# Create commit-id file
-echo "$COMMIT_HASH" > "$SERVER_DIR/commit-id"
-echo -e "${GREEN}✓ Configuration updated${NC}"
-echo ""
+COMMIT_ID="SERVER_COMMIT_ID_PLACEHOLDER"
+COMMIT_HASH="SERVER_COMMIT_HASH_PLACEHOLDER"
+SERVER_DIR="$HOME/.antigravity-server/bin/${COMMIT_ID}"
+TEMP_DIR="/tmp/antigravity-server-install"
 
-# Download and replace Node.js binary with darwin version
-echo -e "${YELLOW}Installing darwin Node.js binary...${NC}"
-NODE_VERSION="v22.11.0"
-curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-arm64.tar.gz" -o "$TEMP_DIR/node.tar.gz"
-tar -xzf "$TEMP_DIR/node.tar.gz" -C "$TEMP_DIR"
-cp "$TEMP_DIR/node-${NODE_VERSION}-darwin-arm64/bin/node" "$SERVER_DIR/node"
-chmod +x "$SERVER_DIR/node"
-echo -e "${GREEN}✓ Node.js ${NODE_VERSION} installed${NC}"
-echo ""
+echo "  Installing to $SERVER_DIR"
 
-# Sign node binary
-echo -e "${YELLOW}Signing binaries...${NC}"
-codesign --force --deep --sign - "$SERVER_DIR/node" 2>/dev/null || true
-echo -e "${GREEN}✓ Binaries signed${NC}"
-echo ""
+# Backup existing installation
+if [ -d "$SERVER_DIR" ]; then
+    mv "$SERVER_DIR" "${SERVER_DIR}.backup.$(date +%Y%m%d%H%M%S)"
+fi
 
-# Rebuild native modules for macOS
-echo -e "${YELLOW}Rebuilding native modules for macOS...${NC}"
+# Create directory
+mkdir -p "$SERVER_DIR"
+
+# Extract server package
+tar -xzf "$TEMP_DIR/server-package.tar.gz" -C "$SERVER_DIR"
+
+# Rebuild native modules
+echo "  Rebuilding native modules..."
 cd "$SERVER_DIR"
-npm rebuild @vscode/spdlog @parcel/watcher 2>&1 | tail -5
-echo -e "${GREEN}✓ Native modules rebuilt${NC}"
-echo ""
+npm rebuild @vscode/spdlog @parcel/watcher > /dev/null 2>&1
 
-# Sign rebuilt modules
-echo -e "${YELLOW}Signing rebuilt modules...${NC}"
+# Sign binaries
+echo "  Signing binaries..."
+codesign --force --deep --sign - "$SERVER_DIR/node" 2>/dev/null || true
 find "$SERVER_DIR/node_modules/@vscode/spdlog" -name "*.node" -exec codesign --force --sign - {} \; 2>/dev/null || true
 find "$SERVER_DIR/node_modules/@parcel/watcher" -name "*.node" -exec codesign --force --sign - {} \; 2>/dev/null || true
-echo -e "${GREEN}✓ Rebuilt modules signed${NC}"
-echo ""
 
-# Clear quarantine flags
+# Clear quarantine
 xattr -dr com.apple.quarantine "$SERVER_DIR" 2>/dev/null || true
 
-# Cleanup
-rm -rf "$TEMP_DIR"
+# Create symlink for compatibility
+ln -sf "$SERVER_DIR" "$HOME/.antigravity-server/bin/latest" 2>/dev/null || true
 
-# Verify installation
-echo -e "${YELLOW}Verifying installation...${NC}"
-cd "$SERVER_DIR"
-SERVER_VERSION=$(./node out/server-main.js --version 2>&1 | head -3)
-echo "$SERVER_VERSION"
+echo "  ✓ Server installed successfully"
+
+# Verify
+VERSION_OUTPUT=$("$SERVER_DIR/node" "$SERVER_DIR/out/server-main.js" --version 2>&1 | head -3)
+echo "  Server version: $VERSION_OUTPUT"
+REMOTESCRIPT
+
+# Replace placeholders
+sed -i.bak "s/SERVER_COMMIT_ID_PLACEHOLDER/${COMMIT_ID}/" "$TEMP_DIR/remote-install.sh"
+sed -i.bak "s/SERVER_COMMIT_HASH_PLACEHOLDER/${COMMIT_HASH}/" "$TEMP_DIR/remote-install.sh"
+rm -f "$TEMP_DIR/remote-install.sh.bak"
+chmod +x "$TEMP_DIR/remote-install.sh"
+
+echo -e "${GREEN}  ✓ Installation script created${NC}"
+
 echo ""
 
-# Check server structure
-echo "=== Server structure ==="
-echo "✓ Entry point: out/server-main.js"
-echo "✓ Server script: bin/antigravity-server"
-ls -la "$SERVER_DIR/out/server-main.js" "$SERVER_DIR/bin/antigravity-server" 2>/dev/null && echo "✓ Key files present"
+# ============================================================================
+# Step 5: Upload and install on remote server
+# ============================================================================
+echo -e "${YELLOW}Step 5: Uploading and installing on remote server...${NC}"
+
+# Create tarball of server package
+echo "  Packaging server files..."
+tar -czf "$TEMP_DIR/server-package.tar.gz" -C "$TEMP_DIR/server" .
+PACKAGE_SIZE=$(du -h "$TEMP_DIR/server-package.tar.gz" | cut -f1)
+echo -e "${GREEN}  ✓ Package created: ${PACKAGE_SIZE}${NC}"
+
+# Upload files to remote server
+echo "  Uploading files to $REMOTE_HOST..."
+ssh "$REMOTE_HOST" "mkdir -p /tmp/antigravity-server-install"
+scp -q "$TEMP_DIR/server-package.tar.gz" "$REMOTE_HOST:/tmp/antigravity-server-install/server-package.tar.gz"
+scp -q "$TEMP_DIR/remote-install.sh" "$REMOTE_HOST:/tmp/antigravity-server-install/remote-install.sh"
+echo -e "${GREEN}  ✓ Upload complete${NC}"
+
+# Execute installation on remote
+echo "  Running installation on $REMOTE_HOST..."
+ssh "$REMOTE_HOST" "zsh -lic 'bash /tmp/antigravity-server-install/remote-install.sh'"
+echo -e "${GREEN}  ✓ Server installed${NC}"
+
 echo ""
 
-# Final check
-echo -e "${GREEN}=== Installation Complete! ===${NC}"
+# ============================================================================
+# Step 6: Restart server on remote
+# ============================================================================
+echo -e "${YELLOW}Step 6: Restarting server on remote...${NC}"
+
+# Kill existing server processes
+ssh "$REMOTE_HOST" "pkill -f antigravity-server || true"
+
+sleep 2
+
+echo -e "${GREEN}  ✓ Server restarted${NC}"
+
+# Cleanup remote temp files
+ssh "$REMOTE_HOST" "rm -f /tmp/antigravity-*.sh /tmp/antigravity-*.tar.gz 2>/dev/null; rm -rf /tmp/antigravity-server-install 2>/dev/null" 2>/dev/null || true
+
 echo ""
-echo "Server directory: $SERVER_DIR"
-echo "Version: $COMMIT_ID"
+echo -e "${GREEN}=== Installation Complete ===${NC}"
 echo ""
-echo -e "${YELLOW}KEY POINTS:${NC}"
-echo "  • Uses linux-arm server tarball (same version)"
-echo "  • Entry point: server-main.js (NOT cli.js!)"
-echo "  • Node binary replaced with darwin-arm64 version"
-echo "  • Native modules rebuilt for macOS"
+echo "Server installed on: ${GREEN}$REMOTE_HOST${NC}"
+echo "Version: ${GREEN}${COMMIT_ID}${NC}"
+echo "Location: ~/.antigravity-server/bin/${COMMIT_ID}"
 echo ""
-echo "You can now connect from your Antigravity client via Remote-SSH."
+echo "Next steps:"
+echo "  1. Open Antigravity on this client machine"
+echo "  2. Connect to $REMOTE_HOST via Remote SSH"
+echo "  3. Start coding!"
 echo ""
-echo -e "${YELLOW}Note: You may see 'spdlog.node' warnings in logs - these can be ignored.${NC}"
-echo "The server will work correctly despite these warnings."
+echo -e "${YELLOW}Note: If you see 'Authentication Required' in the agent panel, please use the recommended OrbStack Linux VM approach.${NC}"
+echo ""
